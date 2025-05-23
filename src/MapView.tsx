@@ -62,7 +62,7 @@ const MapView: React.FC = () => {
     <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
       <div style={{
         position: 'absolute',
-        top: '80px',
+        top: '30px',
         left: '10px',
         zIndex: 1000,
         width: '100%',
@@ -102,7 +102,7 @@ const MapView: React.FC = () => {
         )}
       </div>
       <div style={{ flexGrow: 1 }}>
-        <MapContainer center={start} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={true}>
+        <MapContainer center={start} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution="&copy; OpenStreetMap contributors"
