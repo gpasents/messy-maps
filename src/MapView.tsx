@@ -1,6 +1,10 @@
 // src/MapView.tsx
 import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
 import { useState, useEffect } from 'react';
+import polyline from '@mapbox/polyline';
+
+const ORS_API_KEY = import.meta.env.VITE_ORS_API_KEY;
+console.log('Loaded ORS API key:', ORS_API_KEY);
 
 const MapView: React.FC = () => {
   const [start, setStart] = useState<[number, number] | null>(null);
@@ -10,6 +14,8 @@ const MapView: React.FC = () => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<{ display_name: string; lat: string; lon: string; }[]>([]);
   const [target, setTarget] = useState<[number, number] | null>(null);
+  const [messyRoute, setMessyRoute] = useState<[number, number][]>([]);
+  const [instructions, setInstructions] = useState<string[]>([]);
   const [showDirectionForm, setShowDirectionForm] = useState(false);
   const [searchVisible, setSearchVisible] = useState(true);
 
@@ -49,17 +55,69 @@ const MapView: React.FC = () => {
     return () => clearTimeout(delayDebounce);
   }, [query, endName]);
 
-  const generateMessyRoute = (start: [number, number], end: [number, number]): [number, number][] => {
-    return [
-      start,
-      [start[0] + 0.01, start[1] - 0.01],
-      [start[0] + 0.005, start[1] + 0.015],
-      [end[0] - 0.01, end[1] + 0.01],
-      end
-    ];
-  };
+  const fetchRouteAndMessItUp = async (start: [number, number], end: [number, number]) => {
+    console.log('Calling routing API with:', { start, end });
+    console.log('Using ORS API key:', ORS_API_KEY);
 
-  const messyRoute = start && target ? generateMessyRoute(start, target) : [];
+    // Generate absurd waypoints in the wrong direction
+    const absurdDetours: [number, number][] = [
+      [start[0] + 1.5, start[1] + 2.5],  // plausible east
+      [start[0] - 2.0, start[1] - 3.0],  // plausible southwest
+      [start[0] + 1.0, start[1] - 4.0]   // plausible southeast
+    ];
+
+    const allPoints = [start, ...absurdDetours, end];
+    const coordinates = allPoints.map(([lat, lon]) => [lon, lat]);
+
+    const url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${ORS_API_KEY}`;
+    const body = {
+      coordinates
+    };
+
+    try {
+      console.log('Request URL:', url);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('ORS returned an error:', response.status, errorText);
+        return;
+      }
+
+      const data = await response.json();
+      console.log('Response from ORS:', data);
+
+      if (!data.routes || data.routes.length === 0) {
+        console.warn('No route data returned:', data);
+        return;
+      }
+
+      const route = data.routes[0];
+      const coords = polyline.decode(route.geometry).map(([lat, lng]) => [lat, lng]);
+      const steps = route.segments[0].steps.map((step: any) => step.instruction);
+
+      // Add absurd detours
+      const messy = coords.flatMap((point, index) => {
+        const [lat, lng] = point;
+        if (index % 10 === 0) {
+          return [
+            [lat + 0.002, lng - 0.002],
+            [lat, lng]
+          ];
+        }
+        return [point];
+      });
+
+      setMessyRoute(messy);
+      setInstructions(steps);
+    } catch (error) {
+      console.error('Routing error:', error);
+    }
+  };
 
   const handleSelect = (lat: string, lon: string, name: string) => {
     const coords: [number, number] = [parseFloat(lat), parseFloat(lon)];
@@ -70,6 +128,11 @@ const MapView: React.FC = () => {
     setShowDirectionForm(true);
     setSearchVisible(false);
     setResults([]);
+    if (start) {
+      fetchRouteAndMessItUp(start, coords);
+    } else {
+      console.warn('Start location not yet available when selecting destination.');
+    }
   };
 
   const PanToTarget: React.FC = () => {
@@ -95,43 +158,56 @@ const MapView: React.FC = () => {
         borderRadius: '8px',
         boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
         padding: '8px',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        overflowY: 'auto',
+        maxHeight: '95vh'
       }}>
         {showDirectionForm && (
           <div>
-            <input
-              type="text"
-              value={`📍 ${startName}`}
-              readOnly
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                marginBottom: '8px',
-                border: '1px solid #ccc',
-                borderRadius: '4px',
-                boxSizing: 'border-box'
-              }}
-            />
-            <input
-              type="text"
-              placeholder="Enter destination..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                marginBottom: '8px',
-                border: '1px solid #ccc',
-                borderRadius: '4px',
-                boxSizing: 'border-box'
-              }}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ marginRight: '8px', width: '24px', textAlign: 'center' }}>📍</span>
+              <input
+                type="text"
+                value={startName}
+                readOnly
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ marginRight: '8px', width: '24px', textAlign: 'center' }}>🎯</span>
+              <input
+                type="text"
+                placeholder="Enter destination..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+            {instructions.length > 0 && (
+              <ul style={{ paddingLeft: '24px', fontSize: '14px', color: '#333' }}>
+                {instructions.map((step, i) => (
+                  <li key={i} style={{ marginBottom: '6px' }}>{step}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         {!showDirectionForm && searchVisible && (
           <input
             type="text"
-            placeholder="Search Google Maps"
+            placeholder="Search Messy Maps"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{
@@ -159,24 +235,6 @@ const MapView: React.FC = () => {
             ))}
           </ul>
         )}
-        {showDirectionForm && target && (
-          <button
-            style={{
-              width: '100%',
-              padding: '10px',
-              backgroundColor: '#6200ee',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '16px',
-              cursor: 'pointer',
-              boxSizing: 'border-box',
-              marginTop: '8px'
-            }}
-          >
-            Directions
-          </button>
-        )}
       </div>
       <div style={{ flexGrow: 1 }}>
         {start && (
@@ -193,7 +251,9 @@ const MapView: React.FC = () => {
                 <Popup>Target</Popup>
               </Marker>
             )}
-            {target && <Polyline positions={messyRoute} pathOptions={{ color: 'purple' }} />}
+            {target && messyRoute.length > 0 && (
+              <Polyline positions={messyRoute} pathOptions={{ color: 'purple' }} />
+            )}
             <PanToTarget />
           </MapContainer>
         )}
