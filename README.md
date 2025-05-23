@@ -22,7 +22,6 @@
    ```bash
    git clone https://github.com/your-username/messy-maps.git
    cd messy-maps
-Install dependencies:
 
 2. **Install dependencies:**
    ```bash
